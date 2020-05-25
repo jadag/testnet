@@ -4,7 +4,7 @@ from mnist import MNIST
 import torch.nn as nn
 import torch.nn.functional as func
 import torch.optim  as optimize
-from torch import tensor, cat
+from torch import tensor, cat, load, save
 from caps_net import CapsNet
 
 import numpy as np
@@ -115,6 +115,8 @@ class SelfONN(nn.Module):
         return func.softmax(out)
 
 class TestNet:
+    save_path = 'model_save.ckpt'
+
     def __init__(self):
         self.model = CapsNet()
 
@@ -124,6 +126,15 @@ class TestNet:
         print('total params', pytorch_total_params)
         self.loss_func = nn.BCEWithLogitsLoss()
         self.optim = optimize.Adam(params=self.model.parameters())
+        self.load_model()
+
+    def load_model(self):
+        try:
+            self.module.load_state_dict(load(self.save_path))
+            print('successfully reloaded models')
+        except Exception as e:
+            print('failed to reload model from ', self.save_path)
+            print(e)
 
     def train(self, input,labels):
         self.model.train()
@@ -135,16 +146,59 @@ class TestNet:
         loss.backward()
         self.optim.step()
         print(loss)
+        self.save_model()
 
     def test(self, input,labels):
         self.model.eval()
 
         input_tens = tensor(input)
-        predict = self.model(input_tens).detach()
+        predict = self.model(input_tens)
         # print(predict)
-        error =np.sum( np.argmax(labels,axis=1) != np.argmax(predict.numpy(),axis=1))
+        error =np.sum( np.argmax(labels,axis=1) != np.argmax(predict.detach().numpy(),axis=1))
         return error
 
+    def save_model(self):
+        if self.save_path is not None:
+            save(self.model.state_dict(), self.save_path)
+
+            print("Model saved in file: %s" % self.save_path)
+        else:
+            print('did not save', self.save_path)
+
+
+class TestNetCaps(TestNet):
+    def __init__(self):
+        super(TestNetCaps,self).__init__()
+        self.model = CapsNet()
+        self.save_path = 'caps_net.ckpt'
+        self.loss_func = nn.BCEWithLogitsLoss()
+        self.optim = optimize.Adam(params=self.model.parameters())
+        self.reconstruct_loss = nn.BCEWithLogitsLoss()
+        self.load_model()
+
+    def train(self, input,labels):
+        self.model.train()
+        self.optim.zero_grad()
+        input = tensor(input)
+        labels = tensor(labels)
+        predict, reconstruction = self.model(input, testing=False)
+        loss = self.loss_func(predict,labels)
+        loss_recn = self.reconstruct_loss(reconstruction,input )
+        total_loass = loss+loss_recn
+        total_loass.backward()
+        self.optim.step()
+        print(loss)
+        self.save_model()
+
+
+    def test(self, input,labels):
+        self.model.eval()
+
+        input_tens = tensor(input)
+        predict, _ = self.model(input_tens)
+        # print(predict)
+        error =np.sum( np.argmax(labels,axis=1) != np.argmax(predict.detach().numpy(),axis=1))
+        return error
 
 def transform(im, labels):
     new_ims = []
@@ -168,10 +222,8 @@ if __name__ == "__main__":
     test_data = mnist_data.load_training_in_batches(batch_size)
     im_path = join(base_path)
     # train_data.load()
-    test_net=TestNet()
+    test_net=TestNetCaps()
     counter = 0
-
-
 
     for train_batch, test_batch in zip(train_data,test_data):
         t_start = time.time()

@@ -27,8 +27,11 @@ class CapsNet(nn.Module):
         torch.nn.init.xavier_uniform(self.dig_W )
         torch.nn.init.xavier_uniform(self.dig_2 )
         self.output =nn.Conv2d(10,10,[16,1])
+        self.lin1 = nn.Linear(160,512)
+        self.lin2 = nn.Linear(512, 1024)
+        self.lin3 = nn.Linear(1024, 784)
 
-    def forward(self,x):
+    def forward(self,x, testing =True):
         out = self.conv1(x)
         out = func.relu(out)
 
@@ -39,41 +42,42 @@ class CapsNet(nn.Module):
         # out=func.relu(out)
         out1 =  out1.transpose(2,-1)
         out1= torch.reshape(out1,[-1,1152,1,8])
-        # out1 = torch.matmul(self.dig_W,out1)
 
         dig_out = out1.matmul(self.dig_W).squeeze(2)
         dig_out = dig_out + self.dig_Wb
-        # for i in range(1152):
-        out = self.dynamic_routing(dig_out)
-        #     dig_out[:,i,:]= torch.matmul(out1[:,i,..., 0], self.dig_W[..., i])
-        # dig_out=func.leaky_relu(dig_out).transpose(1,-1)
-        # dig_out = dig_out.matmul(self.dig_2)
-        # dig_out =torch.sum(dig_out ,self.dig_Wb)
 
-        # out = func.leaky_relu(dig_out).transpose(1,-1)
-
-
-        # dig_out = self.digit_caps(out1)
-
-        # out = dig_out.reshape([-1,10,16,1])
-        # out= func.tanh(dig_out)
-        out = self.output(out.unsqueeze(-1))
+        dig_out = self.dynamic_routing(dig_out)
+        reconstructed = None
+        if not testing:
+            reconstructed = self.reconstruct(dig_out)
+        out = self.output(dig_out.transpose(1,-1).unsqueeze(-1))
         out = out.reshape([-1,10])
         out = func.softmax(out)
+        return out, reconstructed
+
+    def reconstruct(self, dig_caps):
+        inp = dig_caps.reshape([-1,160])
+        out = self.lin1(inp)
+        out = func.relu(out)
+        out = self.lin2(out)
+        out = func.relu(out)
+        out = self.lin3(out)
+        out = func.sigmoid(out)
+        out = out.reshape([-1,1,28,28])
         return out
 
     def dynamic_routing(self,u):
         batch_nr= u.shape[0]
-        b=torch.tensor([[[0]*10]*1152]*batch_nr).float()
+        b=torch.tensor([[[0]*1152]*10]*batch_nr).float()
         s = torch.tensor([[[0]*10]*16]*batch_nr).float()
         for i in range(3):
-            c = func.softmax(b,dim=1)
-            for i in range(10):
+            c = func.softmax(b,dim=1)#.transpose(1,-1)
+            # for i in range(10):
                 # for j in range(batch_nr):
-                s[...,i]=torch.matmul(c[...,i].unsqueeze(1),u).squeeze(1)
+            s=torch.matmul(c,u)
             v = self.squash(s)
+            b=b+torch.matmul(u,v).transpose(1,-1)
         return v
-
 
     def squash(self,s):
         #TODO
