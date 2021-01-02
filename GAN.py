@@ -16,6 +16,7 @@ class Discriminator(nn.Module):
         self.conv1 = ONNLayer(1,16)
         self.conv2 = ONNLayer(16,32)
         self.conv3 = ONNLayer(32,64)
+
         self.Linear1 = nn.Linear(64, 32)
         self.Linear2 = nn.Linear(32, 1)
 
@@ -23,10 +24,51 @@ class Discriminator(nn.Module):
         out= self.conv1(inp)
         out= self.conv2(out)
         out= self.conv3(out)
+
         out = out.reshape([-1,64])
         out= self.Linear1(out)
         out = func.tanh(out)
         out= self.Linear2(out)
+        return func.sigmoid(out)
+
+class DCDiscrimintator(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+        self.conv1 = nn.Conv2d(1, 16, 3,stride=2)
+        self.conv2 = nn.Conv2d(16, 32, 3,stride=2)
+        self.conv3 = nn.Conv2d(32, 64, 3,stride=2,padding=1)
+        self.conv4 = nn.Conv2d(64, 128, 3, stride=2)
+
+        self.bn1 = nn.BatchNorm2d(16)
+        self.bn2 = nn.BatchNorm2d(32)
+        self.bn3 = nn.BatchNorm2d(64)
+        self.bn4 = nn.BatchNorm2d(128)
+        self.bn5 = nn.BatchNorm2d(128)
+        self.Linear1 = nn.Linear(128, 64)
+        self.Linear2 = nn.Linear(64, 32)
+        self.Linear3 = nn.Linear(32, 1)
+
+    def forward(self, inp):
+        out = self.conv1(inp)
+        out = func.leaky_relu(out, negative_slope=0.2)
+        out = self.bn1(out)
+        out = self.conv2(out)
+        out = func.leaky_relu(out, negative_slope=0.2)
+        out = self.bn2(out)
+        out = self.conv3(out)
+        out = func.leaky_relu(out, negative_slope=0.2)
+        out = self.bn3(out)
+        out = self.conv4(out)
+        out = func.leaky_relu(out, negative_slope=0.2)
+        out = self.bn4(out)
+
+        out = out.reshape([-1, 128])
+        out = self.Linear1(out)
+        out = func.tanh(out)
+        out = self.Linear2(out)
+        out = func.tanh(out)
+        out = self.Linear3(out)
         return func.sigmoid(out)
 
 class Generator(nn.Module):
@@ -35,42 +77,63 @@ class Generator(nn.Module):
         self.onn1 = ONNLayer(1,64)
         # self.conv2 = ONNLayer(16,32)
         # self.conv3 = ONNLayer(32,64)
-        self.dec1 = Decoder(64,128)
-        self.conv1 = nn.Conv2d(128,64,3,padding=1)
-        self.dec2 = Decoder(64,64)
+        self.conv0 = nn.Conv2d(1, 32, 3, padding=1)
+        # self.dec1 = Decoder(64,128)
+        self.conv1 = nn.Conv2d(32,128,3,padding=1)
+        self.dec2 = Decoder(128,64)
         self.conv2 = nn.Conv2d(64, 32,3,padding=1)
-        self.dec3 = Decoder(32,16)
-        self.conv3 = nn.Conv2d(16, 1,3,padding=1)
+        # self.dec3 = Decoder(32,16)
+        self.conv3 = nn.Conv2d(32, 16, 3)
+        self.conv4 = nn.Conv2d(16, 1,3)
+
+        self.bn0 = nn.BatchNorm2d(32)
+        self.bn1 = nn.BatchNorm2d(128)
+        self.bn2 = nn.BatchNorm2d(32)
+        self.bn3 = nn.BatchNorm2d(16)
+        self.bndec = nn.BatchNorm2d(64)
 
     def forward(self, inp):
-        out= self.onn1(inp)
+        # out= self.onn1(inp)
         # out= self.conv2(out)
         # out= self.conv3(out)
-        out = self.dec1(out)
+        out = self.conv0(inp)
+        out = func.relu(out)
+        out= self.bn0(out)
+        # out = self.dec1(out)
         out=self.conv1(out)
-        out=func.leaky_relu(out)
+        out=func.relu(out)
+        out = self.bn1(out)
         out = self.dec2(out)
+        out=func.relu(out)
+        out= self.bndec(out)
         out = self.conv2(out)
-        out = func.leaky_relu(out)
-        out = self.dec3(out)
+        out=func.relu(out)
+        out = self.bn2(out)
+        # out = self.dec3(out)
+        out = func.relu(out)
+        out = func.leaky_relu(out, negative_slope=0.2)
         out = self.conv3(out)
-        # out = func.relu(out)
+        out = self.bn3(out)
+        out = func.relu(out)
+        out = self.conv4(out)
+
+        out = func.tanh(out)
         return out
 
 class GAN:
     save_path_gen = 'generator2.ckpt'
-    save_path_disc = 'disciminator.ckpt'
+    save_path_disc = 'disciminator2.ckpt'
 
     def __init__(self):
         self.generator = Generator()
-        self.discriminator = Discriminator()
+        self.discriminator = DCDiscrimintator()
 
         pytorch_total_params = sum(p.numel() for p in self.generator.parameters() if p.requires_grad)
         print('total params', pytorch_total_params)
         self.disc_loss_func = nn.BCELoss()
         self.gen_loss_func = nn.BCELoss()
         self.gen_optim = optimize.Adam(params=self.generator.parameters(), lr=0.0001)
-        self.disc_optim = optimize.Adam(params=self.discriminator.parameters(),lr=0.000001)
+        self.disc_optim = optimize.Adam(params=self.discriminator.parameters(),lr=0.0001)
 
         try:
             self.generator.load_state_dict(torch.load(self.save_path_gen))
@@ -156,7 +219,7 @@ class GAN:
         gen_in = 2*np.random.random_sample([1, 1, 16, 16])-1
         gen_in = tensor(gen_in).float()
         gen_images = self.generator(gen_in)
-        show_im =  (gen_images[0][0].detach().numpy() * 80 + 35).astype(np.uint8)
+        show_im =  ((gen_images[0][0].detach().numpy() +1)*255).astype(np.uint8)
         show_im = cv2.resize(show_im,(300,300))
         cv2.imshow('generated',show_im)
         key = cv2.waitKey(20)
@@ -176,8 +239,8 @@ if __name__ == "__main__":
     for train_batch, test_batch in zip(train_data,test_data):
         t_start = time.time()
         im,label = transform(train_batch[0],train_batch[1])
-        # if counter <100:
-        test_net.train_discrimintor(im)
+        if counter %4==0:
+            test_net.train_discrimintor(im)
 
         test_net.train_generator()
         # im, label = transform(test_batch[0],test_batch[1])

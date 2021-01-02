@@ -82,14 +82,17 @@ class ONNDecoder(ONNLayer):
 class Decoder(nn.Module):
     def __init__(self,chan_in, chan_out,poly_n = 3):
         super(Decoder,self).__init__()
-        self.upsample = nn.UpsamplingNearest2d(scale_factor=2)
-        self.conv = nn.Conv2d(chan_in,chan_out,3)
+        self.upsample = nn.ConvTranspose2d(chan_out,chan_out,2,stride=2)
+        self.conv = nn.Conv2d(chan_in,chan_out,3,padding=1)
+        self.bn1 = nn.BatchNorm2d(chan_in)
+        self.bn2 = nn.BatchNorm2d(chan_out)
 
     def forward(self, input):
-
-        out = self.conv(input)
+        out = self.bn1(input)
+        out = self.conv(out)
         out = out.squeeze(2)
-        out = func.leaky_relu(out)
+        out = func.relu(out)
+        out = self.bn2(out)
         out = self.upsample(out)
 
         return out
@@ -205,7 +208,7 @@ def transform(im, labels):
     new_labels = []
     for i,l in zip(im,labels):
         new_im = np.array(i,dtype=np.float32).reshape([1,1,28,28])
-        new_im = (new_im-35)/80
+        new_im = new_im/255
         new_ims.append(new_im)
         new_l = [[0]*10]
         new_l[0][l] =1
