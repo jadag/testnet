@@ -4,7 +4,8 @@ from mnist import MNIST
 import torch.nn as nn
 import torch.nn.functional as func
 import torch.optim  as optimize
-from torch import tensor, cat, load, save
+from torch import tensor, cat, load, save, device, cuda
+import torch
 from caps_net import CapsNet
 
 import numpy as np
@@ -114,10 +115,34 @@ class SelfONN(nn.Module):
         out= self.Linear2(out)
         return func.softmax(out)
 
-class TestNet:
+class BaseNet:
+    def load_device(self):
+        if cuda.is_available():
+            self.device = device("cuda")
+        else:
+            self.device = device("cpu")
+
+    def load_model(self):
+        try:
+            self.module.load_state_dict(load(self.save_path))
+            print('successfully reloaded models')
+        except Exception as e:
+            print('failed to reload model from ', self.save_path)
+            print(e)
+
+    def save_model(self):
+        if self.save_path is not None:
+            save(self.model.state_dict(), self.save_path)
+
+            print("Model saved in file: %s" % self.save_path)
+        else:
+            print('did not save', self.save_path)
+
+class TestNet(BaseNet):
     save_path = 'model_save.ckpt'
 
     def __init__(self):
+        super(TestNet,self).__init__()
         self.model = CapsNet()
 
         for module, parameters in zip(self.model.modules(),self.model.parameters()):
@@ -128,13 +153,6 @@ class TestNet:
         self.optim = optimize.Adam(params=self.model.parameters())
         self.load_model()
 
-    def load_model(self):
-        try:
-            self.module.load_state_dict(load(self.save_path))
-            print('successfully reloaded models')
-        except Exception as e:
-            print('failed to reload model from ', self.save_path)
-            print(e)
 
     def train(self, input,labels):
         self.model.train()
@@ -157,47 +175,50 @@ class TestNet:
         error =np.sum( np.argmax(labels,axis=1) != np.argmax(predict.detach().numpy(),axis=1))
         return error
 
-    def save_model(self):
-        if self.save_path is not None:
-            save(self.model.state_dict(), self.save_path)
 
-            print("Model saved in file: %s" % self.save_path)
-        else:
-            print('did not save', self.save_path)
-
-
-class TestNetCaps(TestNet):
+class TestNetCaps(BaseNet):
     def __init__(self):
         super(TestNetCaps,self).__init__()
+        self.load_device()
         self.model = CapsNet()
+        self.model = self.model.to(self.device)
         self.save_path = 'caps_net.ckpt'
         self.loss_func = nn.BCEWithLogitsLoss()
+
         self.optim = optimize.Adam(params=self.model.parameters())
-        self.reconstruct_loss = nn.BCEWithLogitsLoss()
+        self.reconstruct_loss = nn.MSELoss()
         self.load_model()
+
 
     def train(self, input,labels):
         self.model.train()
         self.optim.zero_grad()
-        input = tensor(input)
-        labels = tensor(labels)
-        predict, reconstruction = self.model(input, testing=False)
+        input = tensor(input).to(self.device)
+
+        # label_indx =np.argmax( labels,axis=1)
+        labels = tensor(labels).to(self.device)
+
+        # masks = labels.repeat(1,1,16).reshape([-1,16,10])
+        predict, reconstruction = self.model(input,labels, testing=False)
+
+
         loss = self.loss_func(predict,labels)
-        loss_recn = self.reconstruct_loss(reconstruction,input )
+        loss_recn = self.reconstruct_loss(reconstruction,input )*0.4
         total_loass = loss+loss_recn
         total_loass.backward()
         self.optim.step()
-        print(loss)
+        print(loss,'loss_recn',loss_recn,labels[0])
         self.save_model()
-
+        cv2.imshow('reconstruction',(200*reconstruction.detach().cpu().numpy()[0][0]).astype(np.uint8))
+        cv2.waitKey(20)
 
     def test(self, input,labels):
         self.model.eval()
 
-        input_tens = tensor(input)
-        predict, _ = self.model(input_tens)
+        input_tens = tensor(input).to(self.device)
+        predict, reconstructed = self.model(input_tens)
         # print(predict)
-        error =np.sum( np.argmax(labels,axis=1) != np.argmax(predict.detach().numpy(),axis=1))
+        error =np.sum( np.argmax(labels,axis=1) != np.argmax(predict.detach().cpu().numpy(),axis=1))
         return error
 
 def transform(im, labels):
@@ -205,7 +226,7 @@ def transform(im, labels):
     new_labels = []
     for i,l in zip(im,labels):
         new_im = np.array(i,dtype=np.float32).reshape([1,1,28,28])
-        new_im = (new_im-35)/80
+        new_im = (new_im)/255
         new_ims.append(new_im)
         new_l = [[0]*10]
         new_l[0][l] =1
