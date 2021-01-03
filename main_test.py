@@ -83,16 +83,25 @@ class ONNDecoder(ONNLayer):
 class Decoder(nn.Module):
     def __init__(self,chan_in, chan_out,poly_n = 3):
         super(Decoder,self).__init__()
-        self.upsample = nn.UpsamplingNearest2d(scale_factor=2)
-        self.conv = nn.Conv2d(chan_in,chan_out,3)
+        self.upsample = nn.ConvTranspose2d(chan_out,chan_out,2,stride=2,bias=False)
+        self.conv = nn.Conv2d(chan_in,chan_out,5,padding=2,bias=False)
+        self.bn1 = nn.BatchNorm2d(chan_in)
+        self.bn2 = nn.BatchNorm2d(chan_out)
+        self.bn3 = nn.BatchNorm2d(chan_out)
+        self.conv2 = nn.Conv2d(chan_out,chan_out,5,padding=2,bias=False)
+
 
     def forward(self, input):
-
-        out = self.conv(input)
-        out = out.squeeze(2)
-        out = func.leaky_relu(out)
+        out = self.bn1(input)
+        out = self.conv(out)
+        # out = out.squeeze(2)
+        out = func.relu(out)
+        out = self.bn2(out)
         out = self.upsample(out)
-
+        out=func.leaky_relu(out, negative_slope=0.2)
+        out=self.bn3(out)
+        out = self.conv2(out)
+        out = func.leaky_relu(out, negative_slope=0.2)
         return out
 
 
@@ -198,7 +207,7 @@ class TestNetCaps(BaseNet):
         # label_indx =np.argmax( labels,axis=1)
         labels = tensor(labels).to(self.device)
 
-        # masks = labels.repeat(1,1,16).reshape([-1,16,10])
+
         predict, reconstruction = self.model(input,labels, testing=False)
 
 
@@ -225,8 +234,15 @@ def transform(im, labels):
     new_ims = []
     new_labels = []
     for i,l in zip(im,labels):
-        new_im = np.array(i,dtype=np.float32).reshape([1,1,28,28])
-        new_im = (new_im)/255
+        new_im = np.array(i,dtype=np.uint8).reshape([28,28])
+
+        new_im=cv2.cvtColor(new_im,cv2.COLOR_GRAY2BGR)
+        new_im=cv2.resize(new_im,(32,32))
+        # cv2.imshow('new_im',new_im)
+        # cv2.waitKey()
+        new_im=np.expand_dims(new_im,0)
+        new_im=new_im.swapaxes(1,-1)
+        new_im = (new_im.astype(np.float32)-127.5)/127.5
         new_ims.append(new_im)
         new_l = [[0]*10]
         new_l[0][l] =1

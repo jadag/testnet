@@ -67,7 +67,7 @@ class CapsNet(nn.Module):
         out = func.relu(out)
         out = self.lin3(out)
         out = func.sigmoid(out)
-        out = out.reshape([-1,1,28,28])
+        out = out.reshape([-1,1,32,32])
         return out
 
     def dynamic_routing(self,u):
